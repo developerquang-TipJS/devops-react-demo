@@ -1,3 +1,4 @@
+# Dockerfile  →  cấu hình cho lệnh docker build  →  tạo ra Image
 # ---------- Stage 1: build ----------
 # Dùng Node để cài dependency và build ra file tĩnh (thư mục dist/)
 FROM node:22-alpine AS build
@@ -20,3 +21,11 @@ COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
+
+# Stage 1 (build)                         Stage 2 (image cuối)
+# ┌──────────────────────┐                ┌──────────────────────────┐
+# │ Node 22              │                │ Nginx                    │
+# │ node_modules (~100MB)│                │ nginx.conf  ← từ máy bạn │
+# │ src/, package.json…  │                │                          │
+# │ dist/  ──────────────┼── --from=build─▶ /usr/share/nginx/html/   |
+# └──────────────────────┘                └──────────────────────────┘

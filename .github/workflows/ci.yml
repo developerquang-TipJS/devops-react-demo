@@ -1,47 +1,69 @@
+# định nghĩa tên trong git
 name: CI
-
+# Khi nào chạy (on = trigger)
+# Chạy khi có người push lên nhánh main,Chạy khi có người mở hoặc cập nhật Pull Request vào main
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+# Một workflow gồm một hoặc nhiều job. Mặc định các job chạy song song, 
+# và mỗi job chạy trên một máy ảo riêng, sạch hoàn toàn. Job sau không thấy file mà job trước đã tạo ra.
 jobs:
   # Job 1: kiểm tra chất lượng code
   build:
+    # runs-on cho biết job chạy trên máy nào
+    # Ở đây GitHub cấp miễn phí một máy ảo Ubuntu (gọi là runner), máy này có sẵn Docker, Git, Node… Chạy xong máy bị xóa.
     runs-on: ubuntu-latest
+    # steps là các bước chạy tuần tự từ trên xuống. Có 2 loại bước (use, run)
     steps:
+      # dùng một action có sẵn, giống như gọi một thư viện người khác đã viết. Cú pháp là tên-tác-giả/tên-action@phiên-bản.
+      # actions/checkout tải code của repo về máy ảo. Máy ảo ban đầu trống trơn, nên gần như mọi job đều bắt đầu bằng bước này.
       - uses: actions/checkout@v4
-
+      # actions/setup-node: Cài Node 22
       - uses: actions/setup-node@v4
+        # with: là cách truyền tham số cho action
         with:
           node-version: 22
+          # cache: npm giúp lưu lại thư mục cache của npm, để những lần chạy sau cài dependency nhanh hơn.
           cache: npm
-
+      # run: chạy một lệnh shell bình thường.
+      # npm ci cài dependency đúng chính xác theo package-lock.json. Lệnh này nên dùng trong CI thay cho npm install,
+      #  vì nó không tự sửa file lock và cho kết quả giống nhau ở mọi lần chạy.
       - run: npm ci
+      # npm run lint chạy Oxlint. Nếu code có lỗi, bước này fail và cả pipeline dừng lại.
       - run: npm run lint
+      # npm run build kiểm tra xem app có build được không.
       - run: npm run build
 
   # Job 2: build Docker image và push lên GitHub Container Registry (ghcr.io)
   docker:
     needs: build                                  # chỉ chạy khi job build thành công
-    if: github.event_name == 'push'               # PR thì không push image
+    # Điều kiện chạy: chỉ khi sự kiện là push
+    # Với Pull Request thì job build vẫn chạy để kiểm tra code, nhưng không đẩy image, vì code trong PR chưa được duyệt.
+    if: github.event_name == 'push'              
     runs-on: ubuntu-latest
+    # Cấp quyền cho token tự động của job: được đọc code và được ghi package
     permissions:
       contents: read
       packages: write                             # cần quyền này để push lên ghcr.io
     steps:
       - uses: actions/checkout@v4
-
+      # Bật Buildx, công cụ build image đời mới của Docker
+      # Nó hỗ trợ cache tốt hơn và build được cho nhiều kiến trúc CPU.
       - uses: docker/setup-buildx-action@v3
-
+      # Đăng nhập vào GitHub Container Registry, tức là "kho chứa image" của GitHub (Docker Hub là một kho khác).
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
+          # github.actor là tên người vừa push code
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}   # token GitHub tự cấp, không cần tạo secret
+          # token GitHub tự cấp, không cần tạo secret
+          password: ${{ secrets.GITHUB_TOKEN }}   
 
       # Tạo tag: latest + mã commit (sha) để biết image nào ứng với commit nào
+      # id: meta đặt tên cho bước này để các bước sau đọc được kết quả của nó qua steps.meta.outputs....
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -49,12 +71,15 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha
-
+      # Đây là bước chính: build bằng Dockerfile rồi push lên registry.
       - uses: docker/build-push-action@v6
         with:
+          # context: . lấy thư mục gốc làm ngữ cảnh build, giống dấu . trong lệnh docker build .
           context: .
           push: true
+          # tags và labels lấy từ bước meta ở trên. Label giúp GitHub liên kết image với repo.
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # cache-from/to: type=gha lưu cache các layer Docker vào cache của GitHub Actions, nên lần build sau nhanh hơn rất nhiều.
           cache-from: type=gha
           cache-to: type=gha,mode=max
